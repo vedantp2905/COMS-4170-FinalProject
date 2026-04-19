@@ -1,0 +1,301 @@
+% !TEX TS-program = pdflatex
+% Overleaf: set the main document to this file, compiler = pdfLaTeX (default).
+% Upload html-report-overview.png into the same Overleaf folder as this .tex
+% (or into a subfolder named "evidence" — see \graphicspath below).
+
+\documentclass[12pt,letterpaper]{article}
+
+\usepackage[letterpaper,margin=1in]{geometry}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{microtype}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage{fancyvrb}
+\usepackage{caption}
+\usepackage{float}
+\usepackage{parskip}
+% hyperref should be loaded last (url breaks, PDF metadata, etc.)
+\usepackage[hidelinks,pdfusetitle]{hyperref}
+
+% Local checkout: evidence lives at ../evidence/; Overleaf: put PNG next to .tex or in evidence/
+\graphicspath{{./}{evidence/}{../evidence/}}
+
+\setlength{\parskip}{0.55em}
+\setlength{\parindent}{0pt}
+
+\definecolor{codebg}{HTML}{F3F5F8}
+\definecolor{codefg}{HTML}{5C1A5C}
+\definecolor{prebg}{HTML}{0F172A}
+\definecolor{prefg}{HTML}{E2E8F0}
+\definecolor{archbg}{HTML}{F0F4FA}
+\definecolor{archfg}{HTML}{0A2540}
+
+\lstdefinestyle{tsblock}{
+  basicstyle=\ttfamily\small\color{prefg},
+  backgroundcolor=\color{prebg},
+  keywordstyle=\color{white}\bfseries,
+  commentstyle=\color{gray!60!white},
+  stringstyle=\color{orange!70!white},
+  breaklines=true,
+  frame=single,
+  rulecolor=\color{prebg},
+  xleftmargin=8pt,
+  xrightmargin=8pt,
+  aboveskip=6pt,
+  belowskip=6pt,
+  showstringspaces=false,
+  keepspaces=true,
+}
+\lstset{style=tsblock,language=Java}
+
+\newcommand{\code}[1]{\texttt{#1}}
+
+% Replace with your team's public or Canvas-linked repository before final PDF submission.
+\newcommand{\OurRepoURL}{https://github.com/USERNAME/COMS4170-Playwright}
+
+\title{\vspace{-0.4in}\textbf{Automated Web Testing with Playwright}}
+\author{%
+  \textsc{Vedant Pungliya} 
+  \and
+  \textsc{Tanish Visanagiri} 
+  \and
+  \textsc{Leyla Kazazic}
+}
+\date{Com S/SE 4170 --- Spring 2026 --- Group Project Report}
+
+\begin{document}
+\maketitle
+\thispagestyle{empty}
+
+%==============================================================
+\section{Introduction}
+%==============================================================
+
+Most web applications today are single-page apps: heavy on asynchronous \code{fetch} calls, client-side routing, and UI that re-renders once the network responds. Unit tests catch logic bugs, but they do not catch what the user actually sees: a button covered by a modal, an assertion that fires before a list has rendered, or a flow that works in Chrome yet fails in Safari.
+
+\textbf{End-to-end (E2E) testing} means driving a real browser, clicking through the application as a user would, and asserting against what appears on screen. The hard part is not writing \code{click()}; it is \textbf{timing}. A test that checks for text before the DOM has updated produces a result that changes from run to run, and older tools put that burden almost entirely on the developer in the form of explicit waits.
+
+For this project we studied \textbf{Playwright} (Microsoft, open source, first released around 2020)~\cite{wikiplaywright}. The assignment permitted Selenium, Cypress, or Playwright; we selected Playwright because many teams are now adopting it, and we wanted to test that reputation against concrete experience. Broader surveys of automated E2E web-testing tools remain a useful map of the design space even as individual products evolve~\cite{leotta}. We used \textbf{version 1.59.x} with \textbf{Node} on an Apple Silicon Mac.
+
+\textbf{What we built.} We installed Playwright and wrote a multi-file test suite (44 tests) against a mix of: \emph{static pages} (e.g., \code{example.com}, Wikipedia), Dave Haeffner's \emph{``the-internet''} Heroku demo (forms, authentication, dynamic loading, all designed for automation practice), and several \emph{production sites} that we expected to resist scripting (Google sign-in, GitHub login, DuckDuckGo, Cloudflare-protected pages, reCAPTCHA). Every test runs under five Playwright \emph{projects} defined in \code{playwright.config.ts}: desktop Chromium, Firefox, and WebKit, plus mobile emulation for Pixel~7 and iPhone~14. At \textbf{44 tests $\times$ 5 projects = 220} test instances, each full run exercises the same suite against every supported browser profile.
+
+\textbf{Headline result.} Practice sites and sites under our control passed cleanly; production sites that treat automation as hostile behaved exactly as expected, and the precise way in which they pushed back turned out to be the most instructive part of the evaluation.
+
+\textbf{Reproducibility.} The Playwright suite is a Node.js codebase in \code{playwright-project/}, versioned with this write-up in the same repository~\cite{grouprepo}. See \texttt{playwright-project/README.md} for setup and how to run the tests.
+
+%==============================================================
+\section{Prior and Alternative Approaches}
+%==============================================================
+
+\textbf{Selenium / WebDriver} has been the default answer in industry for years. The behavior is standardized: the W3C WebDriver recommendation defines how a remote end (the browser) must respond to commands issued by a local end (the test)~\cite{w3cwd}. In practice, a Selenium test communicates with a \emph{driver process} over HTTP (\code{chromedriver}, \code{geckodriver}, and so on)~\cite{selenium}. Each command is effectively its own HTTP request: navigate, locate, click. This works, but it forces the developer to write \emph{explicit waits} (\code{WebDriverWait}, expected conditions) before almost every assertion, and driver versions must stay in lockstep with browser versions, which is awkward in continuous integration.
+
+\textbf{Cypress} takes a different architectural stance: the test itself runs inside the browser's JavaScript context~\cite{cypress}. That design yields a fast, interactive development loop, at the cost of historical limitations around multi-tab and multi-origin scenarios and a tight coupling to a JavaScript-only test runner.
+
+\textbf{Puppeteer} (Google) speaks the Chrome DevTools Protocol (CDP) directly~\cite{puppeteer}. The event-driven model is fast and pleasant to program against, but for most of its history Puppeteer was a Chromium-only tool; serious cross-browser use required additional third-party layers.
+
+Playwright consolidates these lessons: one API, three rendering engines (Chromium, Firefox, WebKit), a \emph{persistent} connection to the browser rather than a request-per-command model, built-in auto-waiting, and debugging tooling (trace viewer, HTML test output, codegen). The combined effect moves a browser suite from ``it worked in a demo'' to ``it is stable enough to run on every commit.''
+
+%==============================================================
+\section{Technical Overview of Playwright}
+%==============================================================
+
+This section outlines Playwright's architecture, then walks through one concrete test end-to-end to ground the discussion in a real example. API details follow the official documentation~\cite{pwdocs} and the open-source project~\cite{pwgh}.
+
+\subsection{Architecture}
+
+\textbf{Process and protocol.} A test process (Node, Python, and so on) imports \code{@playwright/test}, which opens a long-lived WebSocket connection to a Playwright \emph{driver} bundled with the install. The driver launches or attaches to a browser process and speaks the appropriate wire protocol per engine: CDP for Chromium, and Playwright's instrumented builds with their own protocols for Firefox and WebKit. This is why \code{npx playwright install} ships large browser bundles: Playwright is not using the unmodified system copy of each browser for every engine.
+
+\textbf{Contexts and pages.} The unit of isolation that matters most in day-to-day use is the \emph{browser context}. Each context maintains its own cookies, \code{localStorage}, IndexedDB, and permissions, analogous to a separate incognito profile. Tests typically receive a \code{page} fixture that belongs to one context per test, and parallel workers each receive their own context so that tests cannot interfere with each other's authentication state. Inside a context, \emph{pages} correspond to tabs; frames and shadow roots are first-class participants in the locator model rather than afterthoughts.
+
+\begin{figure}[H]
+\centering
+\begin{Verbatim}[frame=single,fontsize=\small,xleftmargin=6pt,xrightmargin=6pt]
+  Node test runner (@playwright/test)
+           |
+           |  WebSocket (commands + events)
+           v
+  +-------------------------------------+
+  |  Playwright driver <-> browser proc  |  <- CDP (Chromium) or
+  |  (Chromium / Firefox / WebKit)       |     equivalent (FF, WK)
+  +------------------+------------------+
+                     |
+         +-----------v-----------+
+         |  BrowserContext       |  cookies, storage, permissions
+         |  (one per test / job) |
+         +-----------+-----------+
+                     |
+         +-----------v-----------+
+         |  Page, frames,        |  locators, auto-wait, assertions
+         |  locators             |
+         +-----------------------+
+\end{Verbatim}
+\caption{Logical layering: test runner talks to the driver over a persistent channel; isolation is mostly at the \code{BrowserContext} level; actions and assertions target \code{Page}~/~locators.}
+\label{fig:arch}
+\end{figure}
+
+\subsection{Auto-waiting and Assertions}
+
+Before performing an action (click, fill, select, etc.), Playwright first verifies that the target element is \emph{actionable}: attached to the DOM, visible, stable (not animating), enabled, and not fully obscured by another element. Web assertions such as \code{expect(locator).toHaveText(...)} then \emph{retry} until the timeout rather than sampling the DOM once~\cite{pwdocs}. The combination of actionability checks plus retrying assertions is what allows the framework to eliminate most \code{Thread.sleep(3000)}-style workarounds that appear in older automation tutorials.
+
+\subsection{Walkthrough: dynamic loading without \texttt{sleep()}}
+
+To make the auto-waiting behavior concrete, we exercised the \emph{dynamic loading} page on Dave Haeffner's \emph{the-internet} demo~\cite{theinternet}, a practice site explicitly designed for automation tooling. On \code{/dynamic\_loading/1}, a \emph{Start} button begins a loading animation; several seconds later the text ``Hello World!'' appears inside the element \code{\#finish}.
+
+\paragraph{What the browser does (informally):}
+\begin{enumerate}[leftmargin=1.4em,itemsep=1pt]
+  \item The page loads. \code{\#finish} is present in the DOM but hidden until the load animation completes.
+  \item The user clicks \emph{Start}. The page starts a timer and eventually reveals \code{\#finish~h4}.
+  \item The heading text becomes \code{"Hello World!"}.
+\end{enumerate}
+
+\paragraph{What the test does, step by step:}
+\begin{enumerate}[leftmargin=1.4em,itemsep=1pt]
+  \item \code{page.goto(url)} navigates to the Heroku route. Playwright waits for the default load state so that the document and its scripts are ready.
+  \item \code{page.getByRole('button', \{ name: 'Start' \}).click()} resolves the control by accessible role and name, then clicks only once it is actionable (visible, enabled, unobstructed).
+  \item \code{await expect(page.locator('\#finish h4')).toHaveText('Hello World!')} polls the DOM until the locator matches or the test timeout elapses. No explicit five-second wait is required: the runner waits for the outcome, not a fixed clock.
+\end{enumerate}
+
+The actual spec file mirrors this structure directly:
+
+\begin{lstlisting}
+await page.goto('https://the-internet.herokuapp.com/dynamic_loading/1');
+await page.getByRole('button', { name: 'Start' }).click();
+await expect(page.locator('#finish h4')).toHaveText('Hello World!');
+\end{lstlisting}
+
+\textbf{Why this example is representative.} The failure mode in naive Selenium-style tests is ``assert too early.'' In the Playwright version, the assertion itself is the synchronization point. The same pattern extends to \emph{shadow DOM}: on the \code{shadowdom} route, Playwright's locators transparently pierce shadow roots, so assertions over slotted text succeed without the bespoke traversal that a raw \code{document.querySelector} call would require.
+
+\subsection{Network Interception}
+
+We used \code{page.route()} to stub or block HTTP traffic: dropping images for performance, returning canned JSON for deterministic assertions, and synthesizing error responses where the behavior of a real endpoint would have been hard to provoke. Conceptually, this is closer to ``bring your own network fake'' than to classic WebDriver's remote-HTTP command model~\cite{selenium}. It also made the suite robust to transient failures of public endpoints; when \code{httpbin} timed out once in Firefox, an equivalent routed test produced a deterministic response.
+
+%==============================================================
+\section{Evaluation}
+%==============================================================
+
+\subsection{Results}
+
+Our final full run across all five projects reported \textbf{217 passed}, \textbf{3 skipped}, \textbf{0 failures}, and no flaky reruns. The three skips are intentional \code{test.skip()} calls for the HTML5 drag-and-drop demo under WebKit and mobile emulation, where the underlying demo is unreliable on touch profiles. Total wall time for the 220-instance matrix was approximately \textbf{2--3 minutes} on our hardware; this is not a formal benchmark, but it is enough to confirm that parallel workers and per-test contexts are doing real work.
+
+Per-engine wall times from that run (identical 44 tests in each project) were: Chromium $\sim$45~s, Firefox $\sim$52~s, WebKit $\sim$62~s, Mobile Chrome $\sim$45~s, Mobile Safari $\sim$65~s. Chromium was consistently the fastest engine for a minimal \code{goto example.com} micro-benchmark. The spread between engines is attributable primarily to browser startup and navigation cost, not to Playwright's JavaScript overhead.
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabular}{@{}lrrl@{}}
+\toprule
+\textbf{Project} & \textbf{Passed} & \textbf{Skipped} & \textbf{Notes} \\
+\midrule
+Chromium       & 44 & 0 & Baseline \\
+Firefox        & 44 & 0 & \\
+WebKit         & 43 & 1 & Skipped flaky HTML5 drag demo \\
+Mobile Chrome  & 43 & 1 & Same skip \\
+Mobile Safari  & 43 & 1 & Same skip \\
+\bottomrule
+\end{tabular}
+\caption{Final cross-project run summary (217 passed / 3 skipped / 0 failures).}
+\label{tab:run}
+\end{table}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.85\linewidth]{html-report-overview.png}
+\caption{Excerpt from the generated Playwright HTML test output, showing the same suite executed across Chromium, Firefox, WebKit, and mobile profiles. The figure is reproduced from the actual tool output rather than authored for the write-up.}
+\label{fig:htmlreport}
+\end{figure}
+
+In a realistic team workflow, we would still recommend running at least Chromium plus one non-Chromium engine in CI, so that Safari-only defects do not survive to production.
+
+\subsection{Strengths Observed}
+
+\begin{itemize}[leftmargin=1.4em,itemsep=1pt]
+  \item \textbf{Practice sites.} \code{the-internet}, \code{httpbin}, and Wikipedia served as stable fixtures for learning the API without fighting bot-detection layers.
+  \item \textbf{Traces and HTML output.} When a test did fail during development, the built-in HTML report plus the \code{trace.zip} artifact made it immediately clear \emph{which} step broke~\cite{pwtrace}. This is a substantial improvement over a stack trace and a single screenshot, which was typical of earlier tooling.
+  \item \textbf{\code{storageState}.} Authenticating once, persisting cookies and local storage to a JSON file, and reusing that state across tests removed a large amount of duplicated login code.
+\end{itemize}
+
+\subsection{Observed Limitations}
+
+The following cases matched our expectations going in, but running them end-to-end produced concrete evidence rather than conjecture.
+
+\textbf{DuckDuckGo.} A scripted search from Playwright's Chromium frequently routed to bot or error pages (we observed HTTP \emph{418} ``teapot'' redirects, ``unexpected error'' pages, and occasional CAPTCHA challenges). The same script run under Firefox or WebKit often reached normal search results. The relevant variable is therefore not Playwright itself but the vendor's per-engine fingerprinting. We do not attempt to circumvent it; the point is simply that a search engine is not a stable test fixture. This is precisely the pattern Fowler cautions against when tests depend on ordering and environment~\cite{fowler}.
+
+\textbf{Cloudflare ``prove you are human.''} The known test domain \code{nowsecure.nl} sits behind a Cloudflare interstitial. Playwright successfully loaded the challenge page but not the application behind it. Bypassing such interstitials is out of scope for a course project and typically conflicts with the target site's terms of service.
+
+\textbf{Google account sign-in.} Google refused the flow with messages such as ``This browser or app may not be secure.'' Multi-factor authentication is effectively irrelevant here: the session never reached password entry, let alone a TOTP prompt. This rejection is by design on the vendor's side.
+
+\textbf{GitHub login.} A submit with synthetic credentials produced the expected \code{Incorrect username or password} response. A real account would next face 2FA or WebAuthn. Playwright cannot substitute for a second factor held on a phone or hardware key, so the realistic industrial pattern for authenticated E2E is to use dedicated test accounts with MFA disabled, seeded session state, or mocked authentication endpoints.
+
+\textbf{reCAPTCHA.} We could load the demo and interact with the widget, but \emph{solving} image challenges is outside the design purpose of a browser-automation framework.
+
+\textbf{Non-DOM content.} PDFs and pixels inside a \code{<canvas>} element are not queryable through \code{getByText} and related locators. Playwright can download a PDF or screenshot a canvas, but it cannot read that content the way it reads ordinary DOM text.
+
+\subsection{Applicability}
+
+Playwright is a strong fit when the team controls the system under test and can expose stable selectors (accessible roles, test IDs) in the UI. It is a poor fit when the primary goal is to drive a third party's login wall, anti-bot screen, or MFA gate; the limitation there is not Playwright's engine coverage but the fact that DOM-level UI automation is the wrong abstraction for that class of interaction.
+
+%==============================================================
+\section{Summary and Recommendation}
+%==============================================================
+
+Our goal was to evaluate Playwright by building a non-trivial cross-browser suite against both cooperative and hostile targets. The cooperative targets demonstrated the features that most differentiate Playwright in practice: auto-waiting, context-level isolation, and programmable network interception. The hostile targets clarified the framework's boundary: bot detection, vendor login policies, and MFA are not defects that a longer timeout can fix.
+
+Retaining a small number of tests against production sites was valuable even though we would not run them on every commit in a real project. Those tests force a precise understanding of what ``green in CI'' actually signals when the page under test is outside the team's control.
+
+\textbf{What we would do differently.} Early in the project we spent more effort than necessary on tests that hit third-party sites on every run. In retrospect we would rely more heavily on \code{page.route()} mocking (as we eventually did for HTTP status checks after \code{httpbin} produced a transient failure under Firefox), and gate external ``smoke'' tests behind a separate command or a scheduled job rather than the default \code{npm test}.
+
+\textbf{Future work.} The natural next step is continuous integration. A GitHub Actions workflow could run the Chromium project on every pull request and exercise the Firefox and WebKit projects on a slower schedule, publishing the HTML output and trace artifacts as build assets. A second direction is to replace public practice sites with a locally deployed staging application, which would remove the remaining sources of non-determinism and allow the suite to serve as a regression gate rather than an exploratory study.
+
+\textbf{Recommendation.} We recommend Playwright when (a) the team owns or can instrument the system under test, (b) the team is already comfortable in Node or TypeScript tooling or is willing to adopt it, and (c) cross-engine coverage is required without maintaining three separate driver installations. Cypress is a reasonable alternative for teams that are heavily invested in its component-testing workflow and only need Chromium-family coverage. Selenium remains the pragmatic choice when an organization is locked into the WebDriver ecosystem, for example large Java codebases, existing Selenium Grid infrastructure, or non-JavaScript languages driving browsers.
+
+%==============================================================
+\section*{References}
+\addcontentsline{toc}{section}{References}
+%==============================================================
+
+\begin{thebibliography}{12}
+
+\bibitem{grouprepo}
+V.~Pungliya, T.~Visanagiri, and L.~Kazazic, ``Com S/SE 4170---automated web testing with Playwright,'' online project repository. [Online]. Available: \href{\OurRepoURL}{\texttt{\OurRepoURL}}. Accessed: Apr.~18, 2026.
+
+\bibitem{leotta}
+A.~Leotta \emph{et~al.}, ``Approaches and tools for automated end-to-end web testing,'' in \emph{Advances in Computers}, vol.~101, pp.~193--237, 2016.
+
+\bibitem{wikiplaywright}
+Wikipedia contributors, ``Playwright (software),'' \emph{Wikipedia}, 2026. [Online]. Available: \url{https://en.wikipedia.org/wiki/Playwright_(software)}. Accessed: Apr.~17, 2026.
+
+\bibitem{w3cwd}
+W3C, ``WebDriver,'' W3C Recommendation, June 2018. [Online]. Available: \url{https://www.w3.org/TR/webdriver/}. Accessed: Apr.~17, 2026.
+
+\bibitem{selenium}
+Selenium Project, ``WebDriver~|~Selenium,'' Selenium documentation. [Online]. Available: \url{https://www.selenium.dev/documentation/webdriver/}. Accessed: Apr.~17, 2026.
+
+\bibitem{cypress}
+Cypress.io, ``Documentation,'' Cypress. [Online]. Available: \url{https://docs.cypress.io/}. Accessed: Apr.~17, 2026.
+
+\bibitem{puppeteer}
+Google LLC, ``Puppeteer,'' Puppeteer documentation. [Online]. Available: \url{https://pptr.dev/}. Accessed: Apr.~17, 2026.
+
+\bibitem{pwdocs}
+Microsoft Corp., ``Writing tests,'' \emph{Playwright Documentation}. [Online]. Available: \url{https://playwright.dev/docs/writing-tests}. Accessed: Apr.~17, 2026.
+
+\bibitem{pwgh}
+Microsoft Corp., ``playwright,'' GitHub repository. [Online]. Available: \url{https://github.com/microsoft/playwright}. Accessed: Apr.~17, 2026.
+
+\bibitem{pwtrace}
+Microsoft Corp., ``Trace viewer,'' \emph{Playwright Documentation}. [Online]. Available: \url{https://playwright.dev/docs/trace-viewer}. Accessed: Apr.~17, 2026.
+
+\bibitem{theinternet}
+D.~Haeffner, ``the-internet,'' GitHub repository. [Online]. Available: \url{https://github.com/tourdedave/the-internet}. Accessed: Apr.~17, 2026. Heroku demo: \url{https://the-internet.herokuapp.com/}
+
+\bibitem{fowler}
+M.~Fowler, ``Eradicating non-determinism in tests,'' martinfowler.com, June 2011. [Online]. Available: \url{https://martinfowler.com/articles/nonDeterminism.html}. Accessed: Apr.~17, 2026.
+
+\end{thebibliography}
+
+\end{document}
