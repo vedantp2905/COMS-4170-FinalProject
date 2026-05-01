@@ -78,10 +78,14 @@ test.describe('MFA-protected real sites (limitation)', () => {
 test.describe('Non-HTML content', () => {
   test('Downloading a PDF uses page.waitForEvent("download")', async ({ page }, testInfo) => {
     // Playwright can *download* a PDF but cannot render or query its contents
-    // because PDFs are not HTML DOM.
-    const downloadPromise = page.waitForEvent('download');
-    await page.goto('https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf').catch(() => undefined);
-    const dl = await downloadPromise.catch(() => null);
+    // because PDFs are not HTML DOM. Run goto and waitForEvent concurrently so
+    // the 15s timeout starts at the same time as the navigation — not before it.
+    // Chromium often renders PDFs inline instead of triggering a download, so
+    // we catch the timeout and fall through to the annotation below.
+    const [dl] = await Promise.all([
+      page.waitForEvent('download', { timeout: 15_000 }).catch(() => null),
+      page.goto('https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf').catch(() => undefined),
+    ]);
     if (dl) {
       const path = await dl.path();
       await testInfo.attach('downloaded.pdf', { path: path!, contentType: 'application/pdf' });
