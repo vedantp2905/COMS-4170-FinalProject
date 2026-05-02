@@ -52,6 +52,17 @@ async function main() {
   await page.waitForSelector('#finish h4');
   await page.screenshot({ path: path.join(OUT, 'herokuapp-dynamic-after.png'), fullPage: false });
 
+  console.log('6. Multi-tab demo — original tab and new tab side by side...');
+  await page.goto('https://the-internet.herokuapp.com/windows');
+  await page.screenshot({ path: path.join(OUT, 'multitab-original.png'), fullPage: false });
+  const [newTab] = await Promise.all([
+    context.waitForEvent('page'),
+    page.getByRole('link', { name: 'Click Here' }).click(),
+  ]);
+  await newTab.waitForLoadState();
+  await newTab.screenshot({ path: path.join(OUT, 'multitab-new-window.png'), fullPage: false });
+  await newTab.close();
+
   await browser.close();
   console.log('Done -> ' + OUT);
 }
